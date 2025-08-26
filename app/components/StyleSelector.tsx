@@ -7,7 +7,7 @@ interface StyleSelectorProps {
   onStyleChange: (style: Style) => void;
 }
 
-const styles: Style[] = ['Editorial', 'Streetwear', 'Vintage', 'Minimalist', 'Artistic'];
+const styles: Style[] = ['Editorial', 'Streetwear', 'Vintage'];
 
 export default function StyleSelector({ selectedStyle, onStyleChange }: StyleSelectorProps) {
   return (
