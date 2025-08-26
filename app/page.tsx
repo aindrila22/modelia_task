@@ -1,103 +1,164 @@
-import Image from "next/image";
+'use client';
+
+import { useState, useRef, useCallback, useEffect } from 'react';
+import ImageUpload from './components/ImageUpload';
+import PromptInput from './components/PromptInput';
+import StyleSelector from './components/StyleSelector';
+import GenerationSummary from './components/GenerationSummary';
+import GenerateButton from './components/GenerateButton';
+import History from './components/History';
+import { Generation, Style } from './types';
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState('');
+  const [selectedStyle, setSelectedStyle] = useState<Style>('Editorial');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationHistory, setGenerationHistory] = useState<Generation[]>([]);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
+  // Load history from localStorage on mount
+  useEffect(() => {
+    const savedHistory = localStorage.getItem('modelia-history');
+    if (savedHistory) {
+      try {
+        const history = JSON.parse(savedHistory);
+        setGenerationHistory(history.slice(0, 5)); // Keep only last 5
+      } catch (error) {
+        console.error('Failed to load history:', error);
+      }
+    }
+  }, []);
+
+  // Save history to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('modelia-history', JSON.stringify(generationHistory));
+  }, [generationHistory]);
+
+  const handleImageSelect = useCallback((imageDataUrl: string) => {
+    setSelectedImage(imageDataUrl);
+  }, []);
+
+  const handleGenerate = useCallback(async () => {
+    if (!selectedImage || !prompt.trim()) {
+      alert('Please upload an image and enter a prompt');
+      return;
+    }
+
+    setIsGenerating(true);
+    abortControllerRef.current = new AbortController();
+
+    try {
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          imageDataUrl: selectedImage,
+          prompt: prompt.trim(),
+          style: selectedStyle,
+        }),
+        signal: abortControllerRef.current.signal,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: 'Generation failed' }));
+        throw new Error(errorData.message || 'Generation failed');
+      }
+
+      const result: Generation = await response.json();
+      
+      // Add to history
+      setGenerationHistory(prev => [result, ...prev.slice(0, 4)]);
+      
+      // Update current state with the generated result
+      setSelectedImage(result.imageUrl);
+      setPrompt(result.prompt);
+      setSelectedStyle(result.style);
+      
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('Generation aborted');
+        return; // Don't throw abort errors
+      } else {
+        console.error('Generation error:', error);
+        throw error; // Re-throw to let the button component handle retry
+      }
+    } finally {
+      setIsGenerating(false);
+      abortControllerRef.current = null;
+    }
+  }, [selectedImage, prompt, selectedStyle]);
+
+  const handleAbort = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+  }, []);
+
+  const handleHistorySelect = useCallback((generation: Generation) => {
+    setSelectedImage(generation.imageUrl);
+    setPrompt(generation.prompt);
+    setSelectedStyle(generation.style);
+  }, []);
+
+  const canGenerate = selectedImage && prompt.trim() && !isGenerating;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800">
+      <div className="container mx-auto px-4 py-8">
+        <header className="text-center mb-8">
+          <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-2">
+            Modelia
+          </h1>
+          <p className="text-lg text-gray-600 dark:text-gray-300">
+            AI-Powered Image Generation
+          </p>
+        </header>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Left Column - Upload and Controls */}
+          <div className="space-y-6">
+            <ImageUpload 
+              onImageSelect={handleImageSelect}
+              selectedImage={selectedImage}
             />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+            
+            <PromptInput 
+              value={prompt}
+              onChange={setPrompt}
+              placeholder="Describe the image you want to generate..."
+            />
+            
+            <StyleSelector 
+              selectedStyle={selectedStyle}
+              onStyleChange={setSelectedStyle}
+            />
+            
+            <GenerateButton 
+              onGenerate={handleGenerate}
+              onAbort={handleAbort}
+              isGenerating={isGenerating}
+              disabled={!canGenerate}
+            />
+          </div>
+
+          {/* Right Column - Preview and History */}
+          <div className="space-y-6">
+            <GenerationSummary 
+              image={selectedImage}
+              prompt={prompt}
+              style={selectedStyle}
+            />
+            
+            <History 
+              history={generationHistory}
+              onSelect={handleHistorySelect}
+            />
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+      </div>
     </div>
   );
 }
