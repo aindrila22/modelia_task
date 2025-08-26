@@ -1,4 +1,4 @@
-export type Style = 'Editorial' | 'Streetwear' | 'Vintage' | 'Minimalist' | 'Artistic';
+export type Style = 'Editorial' | 'Streetwear' | 'Vintage';
 
 export interface Generation {
   id: string;

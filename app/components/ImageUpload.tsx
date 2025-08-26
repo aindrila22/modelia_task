@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, memo } from 'react';
 import Image from 'next/image';
 
 interface ImageUploadProps {
@@ -8,98 +8,94 @@ interface ImageUploadProps {
   selectedImage: string | null;
 }
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-const MAX_DIMENSION = 1920;
-
-export default function ImageUpload({ onImageSelect, selectedImage }: ImageUploadProps) {
+const ImageUpload = memo(function ImageUpload({ onImageSelect, selectedImage }: ImageUploadProps) {
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const downscaleImage = useCallback((file: File): Promise<string> => {
+  const validateAndProcessFile = useCallback((file: File) => {
+    setError(null);
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      setError('Please select a valid image file');
+      return;
+    }
+
+    // Validate file size (10MB limit)
+    if (file.size > 10 * 1024 * 1024) {
+      setError('Image size must be less than 10MB');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      if (result) {
+        // Downscale image for better performance
+        downscaleImage(result, 1920, 1920).then(onImageSelect);
+      }
+    };
+    reader.readAsDataURL(file);
+  }, [onImageSelect]);
+
+  const downscaleImage = useCallback((dataUrl: string, maxWidth: number, maxHeight: number): Promise<string> => {
     return new Promise((resolve) => {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d')!;
-      const img = new Image();
-      
+      const img = new globalThis.Image();
       img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d')!;
+
         let { width, height } = img;
-        
-        // Calculate new dimensions if image is too large
-        if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
-          const ratio = Math.min(MAX_DIMENSION / width, MAX_DIMENSION / height);
-          width *= ratio;
-          height *= ratio;
+
+        // Calculate new dimensions
+        if (width > height) {
+          if (width > maxWidth) {
+            height = (height * maxWidth) / width;
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = (width * maxHeight) / height;
+            height = maxHeight;
+          }
         }
-        
+
         canvas.width = width;
         canvas.height = height;
-        
-        // Draw and resize image
+
         ctx.drawImage(img, 0, 0, width, height);
-        
-        // Convert to data URL
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-        resolve(dataUrl);
+        resolve(canvas.toDataURL('image/jpeg', 0.8));
       };
-      
-      img.src = URL.createObjectURL(file);
+      img.src = dataUrl;
     });
   }, []);
 
-  const handleFileSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file) return;
-
-    // Validate file type
-    if (!file.type.match(/image\/(jpeg|jpg|png)/)) {
-      alert('Please select a PNG or JPG image');
-      return;
+    if (file) {
+      validateAndProcessFile(file);
     }
+  }, [validateAndProcessFile]);
 
-    // Validate file size
-    if (file.size > MAX_FILE_SIZE) {
-      alert('File size must be less than 10MB');
-      return;
-    }
-
-    try {
-      // Downscale if necessary
-      const imageDataUrl = await downscaleImage(file);
-      onImageSelect(imageDataUrl);
-    } catch (error) {
-      console.error('Error processing image:', error);
-      alert('Error processing image. Please try again.');
-    }
-  }, [downscaleImage, onImageSelect]);
-
-  const handleDrop = useCallback(async (event: React.DragEvent) => {
+  const handleDrop = useCallback((event: React.DragEvent) => {
     event.preventDefault();
+    setIsDragOver(false);
+
     const file = event.dataTransfer.files[0];
-    if (!file) return;
-
-    // Validate file type
-    if (!file.type.match(/image\/(jpeg|jpg|png)/)) {
-      alert('Please select a PNG or JPG image');
-      return;
+    if (file) {
+      validateAndProcessFile(file);
     }
-
-    // Validate file size
-    if (file.size > MAX_FILE_SIZE) {
-      alert('File size must be less than 10MB');
-      return;
-    }
-
-    try {
-      // Downscale if necessary
-      const imageDataUrl = await downscaleImage(file);
-      onImageSelect(imageDataUrl);
-    } catch (error) {
-      console.error('Error processing image:', error);
-      alert('Error processing image. Please try again.');
-    }
-  }, [downscaleImage, onImageSelect]);
+  }, [validateAndProcessFile]);
 
   const handleDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
+    setIsDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    setIsDragOver(false);
   }, []);
 
   const handleClick = useCallback(() => {
@@ -108,77 +104,65 @@ export default function ImageUpload({ onImageSelect, selectedImage }: ImageUploa
 
   return (
     <div className="space-y-4">
-      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-        Upload Image
-      </label>
-      
       <div
-        className={`
-          relative border-2 border-dashed rounded-lg p-6 text-center cursor-pointer
-          transition-colors duration-200 ease-in-out
-          ${selectedImage 
-            ? 'border-green-300 bg-green-50 dark:border-green-600 dark:bg-green-900/20' 
-            : 'border-gray-300 hover:border-blue-400 dark:border-gray-600 dark:hover:border-blue-500'
-          }
-        `}
-        onClick={handleClick}
+        className={`relative border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${isDragOver
+            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+            : 'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
+          }`}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            handleClick();
-          }
-        }}
-        aria-label="Upload image"
+        onDragLeave={handleDragLeave}
+        onClick={handleClick}
       >
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/jpeg,image/jpg,image/png"
+          accept="image/*"
           onChange={handleFileSelect}
           className="hidden"
-          aria-hidden="true"
+          aria-label="Upload image"
         />
-        
+
         {selectedImage ? (
-          <div className="space-y-2">
-            <div className="relative w-full h-48 rounded overflow-hidden">
+          <div className="relative">
+
+            <div data-testid="uploaded-image">
               <Image
                 src={selectedImage}
                 alt="Selected image"
-                fill
-                className="object-contain"
+                width={300}
+                height={300}
+                className="mx-auto rounded-lg object-cover"
               />
             </div>
-            <p className="text-sm text-green-600 dark:text-green-400">
-              ✓ Image uploaded successfully
-            </p>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              Click to change image
-            </p>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onImageSelect('');
+              }}
+              className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center hover:bg-red-600 transition-colors"
+            >
+              ×
+            </button>
           </div>
         ) : (
-          <div className="space-y-2">
-            <div className="mx-auto w-12 h-12 text-gray-400">
-              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-              </svg>
-            </div>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              <span className="font-medium text-blue-600 dark:text-blue-400">
-                Click to upload
-              </span>{' '}
-              or drag and drop
+          <div>
+            <div className="text-4xl mb-4">📷</div>
+            <p className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+              Upload an image
             </p>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              PNG, JPG up to 10MB
+            <p className="text-gray-500 dark:text-gray-400">
+              Drag and drop an image here, or click to select
             </p>
           </div>
         )}
       </div>
+
+      {error && (
+        <div className="text-red-500 text-sm text-center">{error}</div>
+      )}
     </div>
   );
-}
+});
+
+export default ImageUpload;
